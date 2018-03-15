@@ -7,7 +7,7 @@ import sys
 from request_and_response import HttpRequest, HttpResponse
 
 DOCUMENT_ROOT = os.path.dirname(os.path.abspath(__file__))
-HOST = '127.0.0.0'
+HOST = '127.0.0.1'
 PORT = 80
 TIMEOUT = 60
 PACKET_SIZE = 1024
@@ -54,9 +54,6 @@ class HTTPServer(object):
         if not data:
             return
         request = HttpRequest(data)
-        if request.is_have_error():
-            logging.info('Bad request: %s' % request.get_message())
-            return
         logging.info(request.get_message())
         resp = HttpResponse(request, self.root)
         connection.send(resp.get_response())

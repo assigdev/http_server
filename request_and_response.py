@@ -2,14 +2,16 @@ import time
 import urllib
 
 
+PAGE_400 = b"<html><body><h1><center>Error 400: Bad Request<center/></h1></body></html>"
 PAGE_403 = b"<html><body><h1><center>Error 403: Forbidden<center/></h1></body></html>"
 PAGE_404 = b"<html><body><h1><center>Error 404: File not found<center/></h1></body></html>"
 
 STATUSES = {
     200: 'OK',
+    400: 'Bad Request',
     403: 'Forbidden',
-    404: 'NOT_FOUND',
-    405: 'METHOD_NOT_ALLOWED',
+    404: 'Not Found',
+    405: 'Method Not Allowed',
 }
 
 
@@ -55,6 +57,7 @@ class HttpResponse(object):
     def __init__(self, request, root):
         self.request = request
         self.content_dir = root
+        self.page_400 = PAGE_400
         self.page_403 = PAGE_403
         self.page_404 = PAGE_404
         self.status_code = 200
@@ -86,7 +89,7 @@ class HttpResponse(object):
         self.content_type = self._get_content_type()
 
     def get_response(self):
-        return self.methods[self.request.method]()
+        return self.methods.get(self.request.method, self.not_allowed)()
 
     def get(self):
         return self._create_response()
@@ -140,7 +143,10 @@ class HttpResponse(object):
         return header
 
     def _generate_body(self):
-        if self._is_valid():
+        if self.request.is_have_error():
+            status_code = 400
+            response_data = self.page_400
+        elif self._is_valid():
             filepath = self.content_dir + self.request.url
             try:
                 f = open(filepath, 'rb')

@@ -29,10 +29,6 @@ class ConnectionThread(threading.Thread):
                 connection.close()
                 continue
             request = HttpRequest(data)
-            if request.is_have_error():
-                logging.info('Bad request')
-                connection.close()
-                continue
             logging.info(request.get_message())
             resp = HttpResponse(request, self.root)
             connection.send(resp.get_response())

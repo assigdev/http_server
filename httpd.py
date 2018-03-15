@@ -20,21 +20,11 @@ def process_handle(queue, root):
         handle = queue.get()
         fd = mp_reduction.rebuild_handle(handle)
         connection = socket.fromfd(fd, socket.AF_INET, socket.SOCK_STREAM)
-        if connection == 'DONE':
-            break
-        data = ''
-        try:
-            data = connection.recv(PACKET_SIZE).decode()
-        except:
-            pass
+        data = connection.recv(PACKET_SIZE).decode()
         if not data:
             connection.close()
             continue
         request = HttpRequest(data)
-        if request.is_have_error():
-            logging.info('Bad request')
-            connection.close()
-            continue
         logging.info(request.get_message())
         resp = HttpResponse(request, root)
         connection.send(resp.get_response())

@@ -7,8 +7,8 @@ import unittest
 
 
 class HttpServer(unittest.TestCase):
-  host = "192.168.88.14"
-  port = 8081
+  host = "127.0.0.1"
+  port = 80
 
   def setUp(self):
     self.conn = httplib.HTTPConnection(self.host, self.port, timeout=10)

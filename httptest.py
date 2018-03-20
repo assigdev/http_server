@@ -8,7 +8,7 @@ import unittest
 
 class HttpServer(unittest.TestCase):
   host = "127.0.0.1"
-  port = 80
+  port = 8081
 
   def setUp(self):
     self.conn = httplib.HTTPConnection(self.host, self.port, timeout=10)
@@ -153,7 +153,7 @@ class HttpServer(unittest.TestCase):
       buf = s.recv(1024)
       if not buf: break
       data += buf
-      break
+      # break
     s.close()
     self.assertTrue(data.find("\r\n\r\n") > 0, "no empty line with CRLF found")
     (head, body) = re.split("\r\n\r\n", data, 1);

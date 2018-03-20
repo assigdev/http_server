@@ -1,6 +1,6 @@
 import time
 import urllib
-
+import os
 
 PAGE_400 = b"<html><body><h1><center>Error 400: Bad Request<center/></h1></body></html>"
 PAGE_403 = b"<html><body><h1><center>Error 403: Forbidden<center/></h1></body></html>"
@@ -17,12 +17,17 @@ STATUSES = {
 
 class HttpRequest(object):
     def __init__(self, data):
-        self.message = data.split('\r\n')[0]
         self.data = data.split(' ')
         self.error = False
         self.method = self.get_method()
         self.query = ''
         self.url = self.get_url()
+
+        if data.find('\r\n') != -1:
+            self.line_end = '\r\n'
+        else:
+            self.line_end = '\n'
+        self.message = data.split(self.line_end)[0] or 'Bad Request'
 
     def get_method(self):
         try:
@@ -37,11 +42,11 @@ class HttpRequest(object):
         except IndexError:
             self.error = True
             return ''
-        if url.rfind('?') is not -1:
+        if url.rfind('?') != -1:
             splitted_url = url.split('?')
             url = ''.join(splitted_url[:-1])
             self.query = splitted_url[-1]
-        if url[-1] == "/" and url.rfind('.') is -1:
+        if url[-1] == "/" and url.rfind('.') == -1:
             url += "index.html"
         url = urllib.unquote(url).decode('utf8')
         return url
@@ -57,23 +62,19 @@ class HttpResponse(object):
     def __init__(self, request, root):
         self.request = request
         self.content_dir = root
-        self.page_400 = PAGE_400
-        self.page_403 = PAGE_403
-        self.page_404 = PAGE_404
-        self.status_code = 200
+        self.pages = {
+            400: PAGE_400,
+            403: PAGE_403,
+            404: PAGE_404
+        }
         self.content_length = 0
+        self.filepath = root + request.url
         self.statuses = STATUSES
+        self.status_code = self._get_status()
         self.methods = {
             'GET': self.get,
             'HEAD': self.head,
             'OPTIONS': self.options,
-            'POST': self.not_allowed,
-            'DELETE': self.not_allowed,
-            'UPDATE': self.not_allowed,
-            'PATCH': self.not_allowed,
-            'TRACE': self.not_allowed,
-            'PUT': self.not_allowed,
-            'CONNECT': self.not_allowed,
         }
         self.content_types = {
             'html': 'text/html',
@@ -98,16 +99,16 @@ class HttpResponse(object):
         return self._create_response(is_get=False)
 
     def options(self):
-        header = 'HTTP/1.1 200 OK\r\n'
-        header += 'Allow: OPTIONS, GET, HEAD\r\n'
+        header = 'HTTP/1.1 200 OK{end}'
+        header += 'Allow: OPTIONS, GET, HEAD{end}'
         header += self._generate_last_headers()
-        return header.encode()
+        return header.format(end=self.request.line_end).encode()
 
     def not_allowed(self):
-        header = 'HTTP/1.1 405 METHOD_NOT_ALLOWED\r\n'
-        header += 'Allow: OPTIONS, GET, HEAD\r\n'
+        header = 'HTTP/1.1 405 METHOD_NOT_ALLOWED{end}'
+        header += 'Allow: OPTIONS, GET, HEAD{end}'
         header += self._generate_last_headers()
-        return header.encode()
+        return header.format(end=self.request.line_end).encode()
 
     def _create_response(self, is_get=True):
         body = self._generate_body()
@@ -118,7 +119,7 @@ class HttpResponse(object):
         return response
 
     def _is_valid(self):
-        if self.request.url.find('/../../../') is not -1:
+        if self.request.url.find('/../../../') != -1:
             return False
         else:
             return True
@@ -129,41 +130,45 @@ class HttpResponse(object):
         return content_type
 
     def _generate_headers(self):
-        header = 'HTTP/1.1 {0} {1}\r\n'.format(self.status_code, self.statuses[self.status_code])
-        header += 'Content-Type: {0}\r\n'.format(self.content_type)
+        header = 'HTTP/1.1 {0} {1}{end}'.format(
+            self.status_code,
+            self.statuses[self.status_code],
+            end=self.request.line_end
+        )
+        header += 'Content-Type: {0}{end}'.format(self.content_type, end=self.request.line_end)
         header += self._generate_last_headers()
-        return header
+        return header.format(end=self.request.line_end)
 
     def _generate_last_headers(self):
         time_now = time.strftime("%a, %d %b %Y %H:%M:%S", time.localtime())
-        header = 'Date: {now}\r\n'.format(now=time_now)
-        header += 'Server: Otus teach http server\r\n'
-        header += 'Content-Length: {0}\r\n'.format(self.content_length)
-        header += 'Connection: close\r\n\r\n'
+        header = 'Date: {now}{end}'.format(end=self.request.line_end, now=time_now)
+        header += 'Server: Otus teach http server{end}'
+        header += 'Content-Length: {0}{end}'.format(self.content_length, end=self.request.line_end)
+        header += 'Connection: close{end}{end}'
         return header
 
-    def _generate_body(self):
+    def _get_status(self):
         if self.request.is_have_error():
             status_code = 400
-            response_data = self.page_400
         elif self._is_valid():
-            filepath = self.content_dir + self.request.url
-            try:
-                f = open(filepath, 'rb')
-                response_data = f.read()
-                f.close()
+            if os.path.isfile(self.filepath):
                 status_code = 200
-            except IOError as e:
-                if filepath.endswith('index.html'):
+            else:
+                if self.filepath.endswith('index.html'):
                     status_code = 403
-                    response_data = self.page_403
                 else:
                     status_code = 404
-                    response_data = self.page_404
         else:
             status_code = 403
-            response_data = self.page_403
+        return status_code
+
+    def _generate_body(self):
+        if self.status_code == 200:
+            f = open(self.filepath, 'rb')
+            response_data = f.read()
+            f.close()
+        else:
+            response_data = self.pages[self.status_code]
         content_length = len(response_data)
         self.content_length = content_length
-        self.status_code = status_code
         return response_data

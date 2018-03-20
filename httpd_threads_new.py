@@ -16,40 +16,37 @@ PACKET_SIZE = 1024
 MAX_PACKET_SIZE = 8192
 
 
-class ConnectionThread(threading.Thread):
-    def __init__(self, queue, root):
-        threading.Thread.__init__(self)
-        self.queue = queue
-        self.root = root
+def worker_handle(sock, root, timeout):
+    while True:
+        (connection, address) = sock.accept()
+        connection.settimeout(timeout)
 
-    def run(self):
-        while True:
-            connection = self.queue.get()
-            data = self._receive(connection)
-            request = HttpRequest(data)
-            logging.info(request.get_message())
-            resp = HttpResponse(request, self.root)
-            connection.sendall(resp.get_response())
-            connection.close()
+        data = _receive(connection)
+        request = HttpRequest(data)
+        logging.info(request.get_message())
+        resp = HttpResponse(request, root)
+        connection.sendall(resp.get_response())
+        connection.close()
 
-    def _receive(self, connection):
-        buffer = ''
-        buffer_size = 0
-        while True:
-            try:
-                data = connection.recv(PACKET_SIZE)
-                if buffer_size > MAX_PACKET_SIZE:
-                    break
-                if data:
-                    buffer += data.decode()
-                    buffer_size += len(data)
-                else:
-                    break
-                if buffer.endswith('\r\n\r\n') or buffer.endswith('\n\n'):
-                    break
-            except socket.timeout:
+
+def _receive(connection):
+    buffer = ''
+    buffer_size = 0
+    while True:
+        try:
+            data = connection.recv(PACKET_SIZE)
+            if buffer_size > MAX_PACKET_SIZE:
                 break
-        return buffer
+            if data:
+                buffer += data.decode()
+                buffer_size += len(data)
+            else:
+                break
+            if buffer.endswith('\r\n\r\n') or buffer.endswith('\n\n'):
+                break
+        except socket.timeout:
+            break
+    return buffer
 
 
 class HTTPServer(object):
@@ -66,11 +63,12 @@ class HTTPServer(object):
     def start(self):
         logging.info("Start server")
         self.socket.bind((self.host, self.port))
+        self.socket.listen(5)
         for i in range(self.workers_count):
-            t = ConnectionThread(self.queue, self.root)
+            t = threading.Thread(target=worker_handle, args=(self.socket, self.root, self.timeout))
             t.setDaemon(True)
             t.start()
-        self._listen()
+        worker_handle(self.socket, self.root, self.timeout)
 
     def shutdown(self):
         try:
@@ -81,13 +79,6 @@ class HTTPServer(object):
             logging.debug(exc)
         finally:
             sys.exit(1)
-
-    def _listen(self):
-        self.socket.listen(5)
-        while True:
-            (connection, address) = self.socket.accept()
-            connection.settimeout(self.timeout)
-            self.queue.put(connection)
 
 
 if __name__ == '__main__':

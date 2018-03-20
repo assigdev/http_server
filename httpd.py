@@ -5,29 +5,44 @@ import os
 import socket
 import sys
 from request_and_response import HttpRequest, HttpResponse
-import multiprocessing.reduction as mp_reduction
 
 DOCUMENT_ROOT = os.path.dirname(os.path.abspath(__file__))
-WORKERS_COUNT = 4
 HOST = '127.0.0.1'
-PORT = 80
-TIMEOUT = 10
+PORT = 8080
+TIMEOUT = 4
 PACKET_SIZE = 1024
+MAX_PACKETS_SIZE = 8192
 
 
-def process_handle(queue, root):
+def receive(connection):
+    buffer = ''
+    buffer_size = 0
     while True:
-        handle = queue.get()
-        fd = mp_reduction.rebuild_handle(handle)
-        connection = socket.fromfd(fd, socket.AF_INET, socket.SOCK_STREAM)
-        data = connection.recv(PACKET_SIZE).decode()
-        if not data:
-            connection.close()
-            continue
+        try:
+            data = connection.recv(PACKET_SIZE)
+            if buffer_size > MAX_PACKETS_SIZE:
+                break
+            if data:
+                buffer += data.decode()
+                buffer_size += len(data)
+            else:
+                break
+            if buffer.endswith('\r\n\r\n') or buffer.endswith('\n\n'):
+                break
+        except socket.timeout:
+            break
+    return buffer
+
+
+def process_handle(sock, root, timeout):
+    while True:
+        (connection, address) = sock.accept()
+        connection.settimeout(timeout)
+        data = receive(connection)
         request = HttpRequest(data)
         logging.info(request.get_message())
         resp = HttpResponse(request, root)
-        connection.send(resp.get_response())
+        connection.sendall(resp.get_response())
         connection.close()
 
 
@@ -41,44 +56,36 @@ class HTTPServer(object):
         self.workers_count = opts.workers_count
         self.queue = multiprocessing.Queue()
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
 
     def start(self):
-        try:
-            logging.info("Start server")
-            self.socket.bind((self.host, self.port))
-        except (socket.gaierror, socket.error) as exc:
-            logging.error("Error: Could not bind to port %s" % self.port)
-            logging.debug(exc)
-            self.shutdown()
+        logging.info("Start server")
+        self.socket.bind((self.host, self.port))
+        self.socket.listen(5)
+        procs = []
         for i in range(self.workers_count):
-            proccess = multiprocessing.Process(target=process_handle, args=((self.queue, self.root)))
+            proccess = multiprocessing.Process(target=process_handle, args=((self.socket, self.root, self.timeout)))
             proccess.daemon = True
             proccess.start()
-        self._listen()
+            procs.append(proccess)
+        process_handle(self.socket, self.root, self.timeout)
 
     def shutdown(self):
         try:
             logging.info("Shutting down server")
-            self.socket.shutdown(socket.SHUT_RDWR)
+            self.socket.close()
         except Exception as exc:
             logging.error("Shutting down server error")
             logging.debug(exc)
         finally:
             sys.exit(1)
 
-    def _listen(self):
-        self.socket.listen(5)
-        while True:
-            (connection, address) = self.socket.accept()
-            connection.settimeout(self.timeout)
-            handle = mp_reduction.reduce_handle(connection.fileno())
-            self.queue.put(handle)
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("-r", "--root", default=DOCUMENT_ROOT, help="documents path")
-    parser.add_argument("-w", "--workers_count", default=WORKERS_COUNT, help="count of workers", type=int)
+    parser.add_argument("-w", "--workers_count", default=multiprocessing.cpu_count(), help="count of workers", type=int)
     parser.add_argument("-a", "--host", default=HOST, help="host address")
     parser.add_argument("-p", "--port", default=PORT, help="port for connection", type=int)
     parser.add_argument("-t", "--timeout", default=TIMEOUT, help="timeout for connection", type=int)
@@ -87,9 +94,8 @@ if __name__ == '__main__':
     opts = parser.parse_args()
     logging.basicConfig(filename=opts.log, level=logging.INFO if not opts.debug else logging.DEBUG,
                         format='[%(asctime)s] %(levelname).1s %(message)s', datefmt='%Y.%m.%d %H:%M:%S')
-
+    demon = HTTPServer(opts)
     try:
-        demon = HTTPServer(opts)
         demon.start()
     except KeyboardInterrupt:
         logging.info('Program exit')
@@ -101,3 +107,4 @@ if __name__ == '__main__':
             logging.info("Shutting down process %r", process)
             process.terminate()
             process.join()
+        demon.shutdown()

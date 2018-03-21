@@ -27,7 +27,7 @@ def receive(connection):
                 buffer_size += len(data)
             else:
                 break
-            if buffer.endswith('\r\n\r\n') or buffer.endswith('\n\n'):
+            if buffer.rfind('\r\n\r\n') != -1 or buffer.rfind('\n\n') != -1:
                 break
         except socket.timeout:
             break
@@ -42,8 +42,12 @@ def process_handle(sock, root, timeout):
         request = HttpRequest(data)
         logging.info(request.get_message())
         resp = HttpResponse(request, root)
-        connection.sendall(resp.get_response())
-        connection.close()
+        try:
+            connection.sendall(resp.get_response())
+        except socket.error:
+            logging.error('Send data error')
+        finally:
+            connection.close()
 
 
 class HTTPServer(object):
@@ -94,9 +98,9 @@ if __name__ == '__main__':
     opts = parser.parse_args()
     logging.basicConfig(filename=opts.log, level=logging.INFO if not opts.debug else logging.DEBUG,
                         format='[%(asctime)s] %(levelname).1s %(message)s', datefmt='%Y.%m.%d %H:%M:%S')
-    demon = HTTPServer(opts)
+    daemon = HTTPServer(opts)
     try:
-        demon.start()
+        daemon.start()
     except KeyboardInterrupt:
         logging.info('Program exit')
     except Exception as e:
@@ -107,4 +111,4 @@ if __name__ == '__main__':
             logging.info("Shutting down process %r", process)
             process.terminate()
             process.join()
-        demon.shutdown()
+        daemon.shutdown()
